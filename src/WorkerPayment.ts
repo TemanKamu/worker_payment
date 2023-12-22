@@ -15,7 +15,7 @@ import {
 const user = Record({
   id: Principal,
   username: text,
-  password: text,
+  passwordHash: text, // Store hashed password
   job: Record({
     name: text,
     salary: nat64,
@@ -24,6 +24,7 @@ const user = Record({
   getBalanceAt: text,
   nextGetBalanceAt: text,
 });
+
 const jobList: { name: text; salary: nat64 }[] = [
   {
     name: "Developer",
@@ -48,7 +49,15 @@ export default Canister({
   claimSalaryWorker: update([], Result(text, text), () => {
     // Auth validation
     if (!currentUser) return Err("Please login or register first");
-    // Comparasion date
+
+    const isValidPassword = util.validatePassword(
+      "YourSecretKeyForPasswordHashing",
+      currentUser.passwordHash,
+      currentUser.username
+    );
+
+    if (!isValidPassword) return Err("Invalid password for salary claim");
+
     const aboutDate = comparasionDate(
         getCurrentDate(),
         currentUser.nextGetBalanceAt
@@ -101,26 +110,30 @@ export default Canister({
       return Ok(newAccount);
     }
   ),
+
   login: update([text, text], Result(user, text), (username, password) => {
     if (currentUser) return Err("Already login");
-    const allUsers = Array.from(accounts.values());
-    if (allUsers.length > 0) {
-      const userDetail = allUsers.filter((value: User) => {
-        return value.username === username;
-      })[0];
 
-      if (!userDetail) {
-        return Err(`User not found`);
-      } else if (userDetail.password !== password) {
-        return Err(`Wrong password`);
-      } else {
-        currentUser = userDetail;
-        return Ok(userDetail);
-      }
-    } else {
-      return Err("users are empty");
+    const userDetail = accounts.get(username);
+
+    if (!userDetail) {
+      return Err("User not found");
     }
+
+    const isValidPassword = util.validatePassword(
+      "YourSecretKeyForPasswordHashing",
+      userDetail.passwordHash,
+      password
+    );
+
+    if (!isValidPassword) {
+      return Err("Invalid password");
+    }
+
+    currentUser = userDetail;
+    return Ok(userDetail);
   }),
+
   logout: update([], Result(text, text), () => {
     if (!currentUser) {
       return Err("You are not login");
