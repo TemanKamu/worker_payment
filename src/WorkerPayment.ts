@@ -18,7 +18,7 @@ const user = Record({
   id: Principal,
   username: text,
   job: Record({
-    name: text,
+    title: text,
     salary: nat64,
   }),
   balance: nat64,
