@@ -1,0 +1,13 @@
+{
+    "canisters": {
+        "worker_payment": {
+            "type": "custom",
+            "main": "src/WorkerPayment.ts",
+            "candid": "src/WorkerPayment.did",
+            "build": "npx azle worker_payment --verbose",
+            "wasm": ".azle/worker_payment/worker_payment.wasm",
+            "gzip": true
+        }
+    }
+}
+

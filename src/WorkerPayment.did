@@ -1,0 +1,8 @@
+service: () -> {
+    claimSalaryWorker: () -> (variant {Ok:text; Err:text});
+    getDetailAccount: () -> (variant {Ok:record {id:principal; job:record {salary:nat64; name:text}; username:text; balance:nat64; password:text; getBalanceAt:text; nextGetBalanceAt:text}; Err:text}) query;
+    getJobList: () -> (vec record {salary:nat64; name:text}) query;
+    login: (text, text) -> (variant {Ok:record {id:principal; job:record {salary:nat64; name:text}; username:text; balance:nat64; password:text; getBalanceAt:text; nextGetBalanceAt:text}; Err:text});
+    logout: () -> (variant {Ok:text; Err:text});
+    register: (text, text, text) -> (variant {Ok:record {id:principal; job:record {salary:nat64; name:text}; username:text; balance:nat64; password:text; getBalanceAt:text; nextGetBalanceAt:text}; Err:text});
+}
