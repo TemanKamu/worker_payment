@@ -11,12 +11,11 @@ import {
   Ok,
   Result,
   Vec,
-  bool,
-  ic
 } from "azle";
 const user = Record({
   id: Principal,
   username: text,
+  password: text,
   job: Record({
     name: text,
     salary: nat64,
@@ -24,128 +23,114 @@ const user = Record({
   balance: nat64,
   getBalanceAt: text,
   nextGetBalanceAt: text,
-  isLoggedIn: bool
 });
-const jobList: { title: text; salary: nat64 }[] = [
+const jobList: { name: text; salary: nat64 }[] = [
   {
-    title: "Developer",
+    name: "Developer",
     salary: 100n,
   },
   {
-    title: "Manager",
+    name: "Manager",
     salary: 250n,
   },
 ];
 type JobList = typeof jobList | any;
-type User = typeof user;
-let accounts = StableBTreeMap<typeof Principal, User>(Principal, user,0);
+type User = typeof user | object;
+let currentUser: User | undefined;
+let accounts = StableBTreeMap<Principal, User>(0);
 
 export default Canister({
   // get all jobs
-  getJobList: query([], Vec(Record({ title: text, salary: nat64 })), () => {
+  getJobList: query([], Vec(Record({ name: text, salary: nat64 })), () => {
     return jobList;
   }),
   // Get payment worker
   claimSalaryWorker: update([], Result(text, text), () => {
-    const userOpt = accounts.get(ic.caller());
-    if ("None" in userOpt) {
-      return Err(`Caller=${ic.caller()} needs to be a registered user.`);
-    }
-    const user : User = userOpt.Some;
-    if (!user.isLoggedIn){
-      return Err("User isn't logged in")
-    }
+    // Auth validation
+    if (!currentUser) return Err("Please login or register first");
     // Comparasion date
-    const aboutDate = comparisonDate(
-        getCurrentDate(),
-        user.nextGetBalanceAt
-    );
-
+    const aboutDate = comparasionDate(getCurrentDate(), user.nextGetBalanceAt);
     if (!aboutDate) return Err("Already claim salary");
     if (typeof aboutDate === "number") {
       const toBigintDate = BigInt(aboutDate);
       // Update balance
-      user.balance += user.job.salary * toBigintDate;
+      currentUser.balance += currentUser.job.salary * toBigintDate;
       // Update date getBalance
-      user.getBalanceAt = user.nextGetBalanceAt;
+      currentUser.getBalanceAt = currentUser.nextGetBalanceAt;
       // Update nextGetBalanceat
-      user.nextGetBalanceAt = getNextDate();
-      
+      currentUser.nextGetBalanceAt = getNextDate();
+
       // Update all
-      accounts.insert(user.id, { ...user });
+      accounts.insert(currentUser.id, { ...currentUser });
     }
-    return Ok(`Success claim salary ${user.username}`);
+    return Ok(`Success claim salary ${currentUser.username}`);
   }),
 
   // Create worker account
   register: update(
-    [text, text],
+    [text, text, text],
     Result(user, text),
-    (username, job) => {
+    (username, password, job) => {
+      if (currentUser) return Err("Your already login, u need to logout first");
       const jobUser = getJobUser(job);
-      // checks if job 
       if (!jobUser) {
         return Err(`Job not found. call method getJobList to get list of job`);
       }
-      if (username.trim().length == 0){
-        return Err("Username must not be empty.")
+      const allUsers = Array.from(accounts.values());
+      if (allUsers.length > 0) {
+        const userDetail = allUsers.filter((value: User) => {
+          return value.username === username;
+        })[0];
+        if (userDetail) {
+          return Err(`User already exist`);
+        }
       }
-      const caller = ic.caller();
-      const isRegistered = accounts.containsKey(caller);
-
-      if (isRegistered){
-        return Err("Caller is already registered.")
-      }
-      const newAccount = {
-        id: caller,
+      const newAccount: User | any = {
+        id: generateID(),
         username: username,
+        password: password,
         balance: 0n,
         job: jobUser,
         getBalanceAt: getCurrentDate(),
         nextGetBalanceAt: getNextDate(),
-        isLoggedIn: false
       };
       accounts.insert(newAccount.id, newAccount);
-      return Ok(newAccount as User);
+      return Ok(newAccount);
     }
   ),
-  login: update([], Result(user, text), () => {
-    const userOpt = accounts.get(ic.caller());
-    if ("None" in userOpt) {
-      return Err(`Caller=${ic.caller()} needs to be a registered user.`);
-    }
-    const user : User = userOpt.Some;
-    if (user.isLoggedIn){
-      return Err("Already logged in")
-    }
-    user.isLoggedIn = true;
-    accounts.insert(user.id, user);
-    return Ok(user)
+  login: update([text, text], Result(user, text), (username, password) => {
+    if (currentUser) return Err("Already login");
+    const allUsers = Array.from(accounts.values());
+    if (allUsers.length > 0) {
+      const userDetail = allUsers.filter((value: User) => {
+        return value.username === username;
+      })[0];
 
+      if (!userDetail) {
+        return Err(`User not found`);
+      } else if (userDetail.password !== password) {
+        return Err(`Wrong password`);
+      } else {
+        currentUser = userDetail;
+        return Ok(userDetail);
+      }
+    } else {
+      return Err("users are empty");
+    }
   }),
   logout: update([], Result(text, text), () => {
-    const userOpt = accounts.get(ic.caller());
-    if ("None" in userOpt) {
-      return Err(`Caller=${ic.caller()} needs to be a registered user.`);
+    if (!currentUser) {
+      return Err("You are not login");
     }
-    const user : User = userOpt.Some;
-    if (!user.isLoggedIn){
-      return Err("User isn't logged in")
-    }
-    user.isLoggedIn = false;
-    accounts.insert(user.id, user);
-    return Ok("Logged out")
+    currentUser = undefined;
+    return Ok("Logout successfully.");
   }),
   getDetailAccount: query([], Result(user, text), () => {
-    const userOpt = accounts.get(ic.caller());
-    if ("None" in userOpt) {
-      return Err(`Caller=${ic.caller()} needs to be a registered user.`);
+    if (currentUser) {
+      return Ok(currentUser);
+    } else {
+      return Err("Login or register first");
     }
-    const user : User = userOpt.Some;
-    if (!user.isLoggedIn){
-      return Err("User isn't logged in")
-    }
-    return Ok(user)
   }),
   /* 
     if you want get all account you can ative this code
@@ -179,11 +164,9 @@ function getCurrentDate(): string {
   const date = new Date();
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
-// Function to compare two dates
-function comparisonDate(dateArg1: string, dateArg2: string): number | boolean {
+function comparasionDate(dateArg1: string, dateArg2: string): number | boolean {
   const date1 = new Date(dateArg1);
   const date2 = new Date(dateArg2);
-
   const comparisonDate1 = {
     year: date1.getFullYear(),
     month: date1.getMonth() + 1,
@@ -194,28 +177,30 @@ function comparisonDate(dateArg1: string, dateArg2: string): number | boolean {
     month: date2.getMonth() + 1,
     day: date2.getDate(),
   };
-  const yearComparasion = Number(new Date(date1.getTime() - date2.getTime()).getUTCFullYear() - 1970);
-  const monthComparasion = comparisonDate2.month > comparisonDate1.month ? 
-  comparisonDate2.month - (comparisonDate2.month - comparisonDate1.month):
-  comparisonDate1.month - comparisonDate2.month
-  ;
-
+  const yearComparasion = Number(
+    new Date(date1.getTime() - date2.getTime()).getUTCFullYear() - 1970
+  );
+  const monthComparasion =
+    comparisonDate2.month > comparisonDate1.month
+      ? comparisonDate2.month - (comparisonDate2.month - comparisonDate1.month)
+      : comparisonDate1.month - comparisonDate2.month;
   // only return a number if there is a difference of at least one month or a year
-  if (monthComparasion > 0 || yearComparasion > 0){
+  if (monthComparasion > 0 || yearComparasion > 0) {
     // adds number of years * 12(number of months in a year) + months difference
-    return yearComparasion * 12 + monthComparasion
-  }else{
+    return yearComparasion * 12 + monthComparasion;
+  } else {
     return false;
   }
 }
-
-// Function to check whether the job matches a job title in the jobList variable
+function generateID(): Principal {
+  return Principal.fromUint8Array(Uint8Array.from([Number(accounts.len())]));
+}
 function getJobUser(job: text): Object | null {
   const jobtListUser = Array.from(jobList);
   const jobUser = jobtListUser.find((value: JobList) => {
-    if (value.title === job) {
+    if (value.name === job) {
       return {
-        title: value.title,
+        name: value.name,
         salary: value.salary,
       };
     }
